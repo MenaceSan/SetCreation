@@ -9,32 +9,37 @@ using System.Text;
 
 namespace SetCreation
 {
-    internal class Stats
+    internal class AppArgs
     {
-        // similar to :
+        //  
+
+        public static readonly string[] _image_exts = { ".bmp", ".gif", ".png", ".jpg", ".jpeg" };     // what file types are images?
+        public const int kYearLegit = 2015;     // anything stamped before this is considered to be a legit stamp so keep it.
 
         internal string RootDir;
         internal bool UseDirDate = false;       // set the date on a file via the dir name.
+        internal bool Exact = false;        // just in the same year is ok.
         internal bool Verbose = true;         // Print the class/methods i find.
 
-        internal DateTime DirDate;
+        internal DateTime CreationDate;
 
-        public static readonly string[] _dirsEx = { "bin", "obj", "packages" };
+        public static readonly string[] _dirsEx = { "bin", "obj", "packages" }; // dont read these dirs.
 
-        private static bool IsDirDate(int year)
+        private static bool IsValidYear(int year)
         {
             if (year <= 1900 || year > 2020)
                 return false;
             return true;
         }
-        private static bool IsDirDate(DateTime dt)
+        private static bool IsValidDate(DateTime dt)
         {
-            return IsDirDate(dt.Year);
+            return IsValidYear(dt.Year);
         }
 
-        private static DateTime GetDirDate(string dirName)
+        private static DateTime GetDateFromName(string dirName)
         {
-            // set DirDate
+            // get Date from a name of a file or dir.
+
             if (!char.IsDigit(dirName[0]))
                 return DateTime.MinValue;
 
@@ -64,7 +69,7 @@ namespace SetCreation
                 dts[part] = val;
             }
 
-            if (!IsDirDate(dts[0]))
+            if (!IsValidYear(dts[0]))
                 return DateTime.MinValue;
             if (dts[1] < 1 || dts[1] > 12)
                 dts[1] = 1;
@@ -74,12 +79,9 @@ namespace SetCreation
             return new DateTime(dts[0], dts[1], dts[2]);  // got a date.
         }
 
-        public static readonly string[] _image_exts = { ".bmp", ".gif", ".png", ".jpg", ".jpeg" };     // what file types do we read?
-        public const int kYearLegit = 2015;
-
-        public void SetDirDateImage(string path, DateTime fileDate)
+        public void SetCreationDateImage(string path, DateTime fileDate)
         {
-            // this may throw
+            // ignore throw
 
             try
             {
@@ -112,6 +114,8 @@ namespace SetCreation
                             //if (originalDate.Year < kYearLegit)
                             //    return;
                             if (originalDate == fileDate)
+                                return;
+                            if (!Exact && originalDate.Year == fileDate.Year) // close enough
                                 return;
                         }
                     }
@@ -148,26 +152,28 @@ namespace SetCreation
         }
 
 
-        private void SetDirDate(FileInfo file)
+        private void SetCreationDate(FileInfo file)
         {
-            // use DirDate
-            if (file.Name.StartsWith("."))
+            // use DirDate for file creation time
+            if (file.Name.StartsWith("."))  // hidden file.
                 return;
             if (file.CreationTime.Year < kYearLegit)  // just leave it ?
                 return;
-            if (!IsDirDate(this.DirDate))
+
+            DateTime fileDate = GetDateFromName(file.Name);      // file has its own year.
+            if (!IsValidDate(fileDate))
+                fileDate = this.CreationDate;
+
+            if (!IsValidDate(fileDate))
                 return;
-
-            DateTime fileDate = GetDirDate(file.Name);      // file has its own year.
-            if (!IsDirDate(fileDate))
-                fileDate = this.DirDate;
-
-            if (file.CreationTime == fileDate)
+            if (file.CreationTime == fileDate)  // no change.
+                return;
+            if (!Exact && file.CreationTime.Year == fileDate.Year) // close enough
                 return;
 
             // re-label file.
             file.CreationTime = fileDate;
-            SetDirDateImage(file.FullName, fileDate);
+            SetCreationDateImage(file.FullName, fileDate);   // if its an image.
             File.SetCreationTime(file.FullName, fileDate);
             // File.SetLastWriteTime(file.FullName, fileDate);
         }
@@ -185,7 +191,7 @@ namespace SetCreation
             var Files = d.GetFiles("*.*");      // Getting all files
             foreach (FileInfo file in Files)
             {
-                if (file.Attributes.HasFlag(FileAttributes.Hidden) && file.Attributes.HasFlag(FileAttributes.System)) // e.g. Thumb.db
+                if (file.Attributes.HasFlag(FileAttributes.Hidden) && file.Attributes.HasFlag(FileAttributes.System)) // e.g. Thumb.db ignored
                     continue;
 
                 if (this.Verbose && !showDir)
@@ -195,30 +201,24 @@ namespace SetCreation
                 }
 
                 filesInDir++;
-                if (this.UseDirDate)
-                {
-                    SetDirDate(file);
-                }
-                else
-                {
-                }
+                SetCreationDate(file);
             }
 
             // Recurse into dirs.
             var Dirs = d.GetDirectories();
             foreach (var dir in Dirs)
             {
-                if (_dirsEx.Contains(dir.Name))     // excluded dir
+                if (_dirsEx.Contains(dir.Name))     // excluded dir?
                     continue;
-                if (dir.Name.StartsWith("."))       // hidden
+                if (dir.Name.StartsWith("."))       // hidden dir?
                     continue;
                 if (this.UseDirDate)
                 {
                     // what is the dir name? 
-                    DateTime dt = GetDirDate(dir.Name);
-                    if (!IsDirDate(dt))
+                    DateTime dt = GetDateFromName(dir.Name);
+                    if (!IsValidDate(dt))
                         continue;
-                    DirDate = dt;
+                    CreationDate = dt;
                 }
                 ReadDir(dir.FullName);
             }
@@ -236,7 +236,7 @@ namespace SetCreation
             Console.WriteLine("SetCreation v1");
 
             bool waitOnDone = false;
-            var stats = new Stats();
+            var appargs = new AppArgs();
             foreach (string arg in args)
             {
                 if (string.IsNullOrWhiteSpace(arg))
@@ -248,9 +248,9 @@ namespace SetCreation
                 {
                     Console.WriteLine("SetCreation walks a directory of .cs sources and compiles some statistics.");
                     Console.WriteLine("Use: SetCreation -flag directory");
-                    Console.WriteLine("-wait");
-                    Console.WriteLine("-usedirdate");
-                    Console.WriteLine("-verbose");
+                    Console.WriteLine(" -wait");
+                    Console.WriteLine(" -usedirdate");
+                    Console.WriteLine(" -verbose");
                     return;
                 }
                 if (argL == "-wait")
@@ -260,13 +260,13 @@ namespace SetCreation
                 }
                 if (argL == "-usedirdate")
                 {
-                    stats.UseDirDate = true;
+                    appargs.UseDirDate = true;
                     continue;
                 }
                 
                 if (argL == "-verbose")
                 {
-                    stats.Verbose = true;
+                    appargs.Verbose = true;
                     continue;
                 }
                 if (argL.StartsWith("-"))
@@ -274,14 +274,15 @@ namespace SetCreation
                     Console.WriteLine("Bad Arg");
                     return;
                 }
-                stats.RootDir = arg;
+                appargs.RootDir = arg;
             }
-            if (string.IsNullOrWhiteSpace(stats.RootDir))
-                stats.RootDir = Environment.CurrentDirectory;       // just use current dir.
 
-            Console.WriteLine($"Read Dir '{stats.RootDir}'.");
+            if (string.IsNullOrWhiteSpace(appargs.RootDir))
+                appargs.RootDir = Environment.CurrentDirectory;       // just use current dir.
 
-            stats.ReadDir(stats.RootDir);
+            Console.WriteLine($"Read Dir '{appargs.RootDir}'.");
+
+            appargs.ReadDir(appargs.RootDir);
  
             if (waitOnDone)
             {
